@@ -1,0 +1,30 @@
+{
+  "cli": {
+    "version": ">= 19.0.8",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://192.168.18.13:8000"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://192.168.18.13:8000"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

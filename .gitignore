@@ -31,7 +31,18 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
+
+# python
+__pycache__/
+*.py[cod]
+
+# local database dumps (use scripts/export-database.ps1)
+database/*.sql
+
+# expo test exports
+.expo-export-test/
 
 # typescript
 *.tsbuildinfo
@@ -41,3 +52,4 @@ example
 # generated native folders
 /ios
 /android
+r

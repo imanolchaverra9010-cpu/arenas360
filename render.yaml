@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: arenas360-api
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: GCS_BUCKET
+        value: arenas360-media
+      - key: API_PUBLIC_URL
+        sync: false
+      - key: RESULT_NOTIFICATIONS_INTERVAL_SECONDS
+        value: "300"

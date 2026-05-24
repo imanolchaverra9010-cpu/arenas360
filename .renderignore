@@ -1,0 +1,10 @@
+node_modules/
+.expo/
+.expo-export-test/
+database/
+media/
+venv/
+__pycache__/
+*.pyc
+.env
+.git/

@@ -1,132 +1,119 @@
 import { Image } from 'expo-image';
-import { useState } from 'react';
-import { Dimensions, StyleSheet, View } from 'react-native';
-import Animated, { Easing, Keyframe } from 'react-native-reanimated';
-import { scheduleOnRN } from 'react-native-worklets';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, StyleSheet, View } from 'react-native';
 
-const INITIAL_SCALE_FACTOR = Dimensions.get('screen').height / 90;
-const DURATION = 600;
+import { AppFont } from '@/constants/typography';
 
 export function AnimatedSplashOverlay() {
   const [visible, setVisible] = useState(true);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.6)).current;
+  const overlayOpacity = useRef(new Animated.Value(1)).current;
+  const textSlideAnim = useRef(new Animated.Value(16)).current;
 
-  if (!visible) return null;
+  useEffect(() => {
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          friction: 5,
+          tension: 80,
+          useNativeDriver: true,
+        }),
+        Animated.timing(textSlideAnim, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.delay(700),
+      Animated.timing(overlayOpacity, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setVisible(false);
+    });
+  }, [fadeAnim, overlayOpacity, scaleAnim, textSlideAnim]);
 
-  const splashKeyframe = new Keyframe({
-    0: {
-      transform: [{ scale: INITIAL_SCALE_FACTOR }],
-      opacity: 1,
-    },
-    20: {
-      opacity: 1,
-    },
-    70: {
-      opacity: 0,
-      easing: Easing.elastic(0.7),
-    },
-    100: {
-      opacity: 0,
-      transform: [{ scale: 1 }],
-      easing: Easing.elastic(0.7),
-    },
-  });
+  if (!visible) {
+    return null;
+  }
 
   return (
-    <Animated.View
-      entering={splashKeyframe.duration(DURATION).withCallback((finished) => {
-        'worklet';
-        if (finished) {
-          scheduleOnRN(setVisible, false);
-        }
-      })}
-      style={styles.backgroundSolidColor}
-    />
-  );
-}
+    <Animated.View style={[styles.backgroundSolidColor, { opacity: overlayOpacity }]}>
+      <Animated.View
+        style={[
+          styles.content,
+          {
+            opacity: fadeAnim,
+            transform: [{ scale: scaleAnim }],
+          },
+        ]}
+      >
+        <Image
+          source={require('@/assets/images/icon.png')}
+          style={styles.logoImage}
+          contentFit="contain"
+        />
 
-const keyframe = new Keyframe({
-  0: {
-    transform: [{ scale: INITIAL_SCALE_FACTOR }],
-  },
-  100: {
-    transform: [{ scale: 1 }],
-    easing: Easing.elastic(0.7),
-  },
-});
-
-const logoKeyframe = new Keyframe({
-  0: {
-    transform: [{ scale: 1.3 }],
-    opacity: 0,
-  },
-  40: {
-    transform: [{ scale: 1.3 }],
-    opacity: 0,
-    easing: Easing.elastic(0.7),
-  },
-  100: {
-    opacity: 1,
-    transform: [{ scale: 1 }],
-    easing: Easing.elastic(0.7),
-  },
-});
-
-const glowKeyframe = new Keyframe({
-  0: {
-    transform: [{ rotateZ: '0deg' }],
-  },
-  100: {
-    transform: [{ rotateZ: '7200deg' }],
-  },
-});
-
-export function AnimatedIcon() {
-  return (
-    <View style={styles.iconContainer}>
-      <Animated.View entering={glowKeyframe.duration(60 * 1000 * 4)} style={styles.glow}>
-        <Image style={styles.glow} source={require('@/assets/images/logo-glow.png')} />
+        <Animated.View
+          style={[
+            styles.textContainer,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: textSlideAnim }],
+            },
+          ]}
+        >
+          <View style={styles.logoTextRow}>
+            <Animated.Text style={styles.logoText}>ARENAS</Animated.Text>
+            <Animated.Text style={[styles.logoText, styles.logoTextOrange]}> 360</Animated.Text>
+          </View>
+        </Animated.View>
       </Animated.View>
-
-      <Animated.View entering={keyframe.duration(DURATION)} style={styles.background} />
-      <Animated.View style={styles.imageContainer} entering={logoKeyframe.duration(DURATION)}>
-        <Image style={styles.image} source={require('@/assets/images/expo-logo.png')} />
-      </Animated.View>
-    </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  imageContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  glow: {
-    width: 201,
-    height: 201,
-    position: 'absolute',
-  },
-  iconContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 128,
-    height: 128,
-    zIndex: 100,
-  },
-  image: {
-    position: 'absolute',
-    width: 76,
-    height: 71,
-  },
-  background: {
-    borderRadius: 40,
-    experimental_backgroundImage: `linear-gradient(180deg, #3C9FFE, #0274DF)`,
-    width: 128,
-    height: 128,
-    position: 'absolute',
-  },
   backgroundSolidColor: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: '#208AEF',
-    zIndex: 1000,
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#001529',
+    zIndex: 9999,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  content: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoImage: {
+    width: 120,
+    height: 120,
+    marginBottom: 24,
+  },
+  textContainer: {
+    alignItems: 'center',
+  },
+  logoTextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  logoText: {
+    color: '#FFFFFF',
+    fontSize: 34,
+    fontFamily: AppFont.black,
+    fontStyle: 'italic',
+    letterSpacing: 1.2,
+  },
+  logoTextOrange: {
+    color: '#FF9F1C',
   },
 });
