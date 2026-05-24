@@ -8,7 +8,7 @@ import asyncio
 import logging
 import os
 
-from backend.database import get_db, engine, ensure_schema_updates
+from backend.database import get_db, engine, ensure_schema_updates, validate_database_url
 from backend.models import Base, Usuario, RolUsuario, Evento
 from backend.schemas import (
     LoginRequest,
@@ -97,6 +97,7 @@ app = FastAPI(
 def on_startup():
     """Ensure tables exist when the API starts."""
     validate_secret_key()
+    validate_database_url()
     try:
         Base.metadata.create_all(bind=engine)
         ensure_schema_updates()
