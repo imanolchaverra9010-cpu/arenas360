@@ -1,6 +1,6 @@
 import { getCachedAccessToken, getSession } from '@/utils/session-storage';
 
-export const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.18.13:8000';
+export const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://arenas360-x00o.onrender.com';
 
 let unauthorizedHandler: (() => void) | null = null;
 let tokenProvider: (() => string | null) | null = null;
