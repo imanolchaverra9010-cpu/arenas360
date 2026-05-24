@@ -15,6 +15,8 @@ services:
         sync: false
       - key: SECRET_KEY
         generateValue: true
+      - key: DEBUG
+        value: "False"
       - key: GCS_BUCKET
         value: arenas360-media
       - key: API_PUBLIC_URL

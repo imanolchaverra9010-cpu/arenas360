@@ -97,8 +97,15 @@ app = FastAPI(
 def on_startup():
     """Ensure tables exist when the API starts."""
     validate_secret_key()
-    Base.metadata.create_all(bind=engine)
-    ensure_schema_updates()
+    try:
+        Base.metadata.create_all(bind=engine)
+        ensure_schema_updates()
+    except Exception as exc:
+        logger.exception("Database startup failed")
+        raise RuntimeError(
+            "Cannot connect to PostgreSQL. Set DATABASE_URL in Render Environment "
+            "(Railway → PostgreSQL → Connect → DATABASE_URL)."
+        ) from exc
 
 
 async def _result_notifications_worker() -> None:
