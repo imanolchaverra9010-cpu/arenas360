@@ -81,6 +81,12 @@ def _filter_clause(filtro: str | None) -> str:
     return ""
 
 
+def _tenant_clause(tenant_id: int | None, alias: str = "d") -> tuple[str, dict]:
+    if tenant_id is None:
+        return "", {}
+    return f"AND {alias}.tenant_id = :tenant_id", {"tenant_id": tenant_id}
+
+
 def fetch_atletas_list(
     db: Session,
     q: str | None = None,
@@ -88,6 +94,7 @@ def fetch_atletas_list(
     api_base: str | None = None,
     deporte_id: int | None = None,
     limit: int = 100,
+    tenant_id: int | None = None,
 ) -> list[dict]:
     search_filter = ""
     params: dict = {"limit": limit}
@@ -107,6 +114,9 @@ def fetch_atletas_list(
     if deporte_id is not None:
         deporte_filter = "AND (disc.deporte_id = :deporte_id OR d.deporte_id = :deporte_id)"
         params["deporte_id"] = deporte_id
+
+    tenant_filter, tenant_params = _tenant_clause(tenant_id, "d")
+    params.update(tenant_params)
 
     query = text(f"""
         SELECT
@@ -148,6 +158,7 @@ def fetch_atletas_list(
         LEFT JOIN equipos eq ON eq.id = em.equipo_id
         WHERE 1=1
           {_filter_clause(filtro)}
+          {tenant_filter}
           {deporte_filter}
           {search_filter}
         GROUP BY d.id, d.activo, d.created_at, per.foto, per.fecha_nacimiento,
@@ -197,7 +208,8 @@ def fetch_atletas_list(
     return athletes
 
 
-def fetch_atletas_resumen(db: Session, filtro: str | None = None) -> dict:
+def fetch_atletas_resumen(db: Session, filtro: str | None = None, tenant_id: int | None = None) -> dict:
+    tenant_filter, tenant_params = _tenant_clause(tenant_id, "d")
     query = text(f"""
         SELECT
             COUNT(DISTINCT d.id) AS total,
@@ -209,8 +221,9 @@ def fetch_atletas_resumen(db: Session, filtro: str | None = None) -> dict:
             AND r.estado IN ('VALIDADO', 'OFICIAL') AND r.descalificado = false
         WHERE 1=1
           {_filter_clause(filtro)}
+          {tenant_filter}
     """)
-    row = db.execute(query).mappings().first()
+    row = db.execute(query, tenant_params).mappings().first()
     return {
         "total": int(row["total"] or 0),
         "totalMedals": int(row["total_medals"] or 0),
@@ -303,6 +316,7 @@ def _fetch_competitions(db: Session, deportista_id: int) -> list[dict]:
             e.fecha_inicio,
             e.fecha_fin,
             e.estado,
+            e.tenant_id,
             s.nombre AS escenario_nombre,
             s.municipio,
             COUNT(DISTINCT i.prueba_id) AS pruebas,
@@ -313,7 +327,7 @@ def _fetch_competitions(db: Session, deportista_id: int) -> list[dict]:
         LEFT JOIN resultados r ON r.inscripcion_id = i.id
             AND r.estado IN ('VALIDADO', 'OFICIAL') AND r.descalificado = false
         WHERE i.deportista_id = :deportista_id AND e.activo = true
-        GROUP BY e.id, e.nombre, e.fecha_inicio, e.fecha_fin, e.estado,
+        GROUP BY e.id, e.nombre, e.fecha_inicio, e.fecha_fin, e.estado, e.tenant_id,
                  s.nombre, s.municipio
         ORDER BY e.fecha_inicio DESC NULLS LAST
         LIMIT 10
@@ -327,7 +341,7 @@ def _fetch_competitions(db: Session, deportista_id: int) -> list[dict]:
             fecha_inicio=row["fecha_inicio"],
             fecha_fin=row["fecha_fin"],
             estado=row["estado"] or "",
-            tenant_id=1,
+            tenant_id=int(row.get("tenant_id") or 1),
             activo=True,
         )
         escenario = Escenario(nombre=row["escenario_nombre"], municipio=row["municipio"]) if row["escenario_nombre"] or row["municipio"] else None
@@ -349,8 +363,15 @@ def _fetch_competitions(db: Session, deportista_id: int) -> list[dict]:
     return competitions
 
 
-def fetch_atleta_perfil(db: Session, deportista_id: int, api_base: str | None = None) -> dict | None:
-    query = text("""
+def fetch_atleta_perfil(
+    db: Session,
+    deportista_id: int,
+    api_base: str | None = None,
+    tenant_id: int | None = None,
+) -> dict | None:
+    tenant_filter, tenant_params = _tenant_clause(tenant_id, "d")
+    params = {"deportista_id": deportista_id, **tenant_params}
+    query = text(f"""
         SELECT
             d.id,
             d.activo,
@@ -394,12 +415,13 @@ def fetch_atleta_perfil(db: Session, deportista_id: int, api_base: str | None = 
         LEFT JOIN equipo_miembros em ON em.deportista_id = d.id
         LEFT JOIN equipos eq ON eq.id = em.equipo_id
         WHERE d.id = :deportista_id
+          {tenant_filter}
         GROUP BY d.id, d.activo, d.created_at, per.foto, per.fecha_nacimiento,
                  dep.nombre, disc.nombre, mun.nombre,
                  per.primer_nombre, per.segundo_nombre, per.primer_apellido, per.segundo_apellido
         LIMIT 1
     """)
-    row = db.execute(query, {"deportista_id": deportista_id}).mappings().first()
+    row = db.execute(query, params).mappings().first()
     if not row:
         return None
 

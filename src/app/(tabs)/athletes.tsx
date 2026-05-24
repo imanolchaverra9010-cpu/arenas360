@@ -7,6 +7,7 @@ import {
   Dimensions,
   Image,
   Platform,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -81,6 +82,7 @@ export default function AthletesScreen() {
     totalRecords: 0,
   });
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [fromCache, setFromCache] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -89,7 +91,7 @@ export default function AthletesScreen() {
   const activeCount = athletes.filter((a) => a.status === 'ACTIVO').length;
 
   const loadAthletes = useCallback(
-    async (query = searchQuery, filterIndex = activeFilter) => {
+    async (query = searchQuery, filterIndex = activeFilter, forceNetwork = false) => {
       setError('');
 
       const params = new URLSearchParams();
@@ -99,32 +101,46 @@ export default function AthletesScreen() {
       }
       const path = `/api/atletas/?${params.toString()}`;
 
-      const cached = await peekCacheForPath<{ athletes: AthleteItem[]; summary: AthletesSummary }>(path);
-      if (cached) {
-        setFromCache(true);
-        setAthletes((cached.data.athletes || []) as AthleteItem[]);
-        setSummary(cached.data.summary || { total: 0, totalMedals: 0, totalRecords: 0 });
-        setLoading(false);
-      } else {
-        setLoading(true);
+      if (!forceNetwork) {
+        const cached = await peekCacheForPath<{ athletes: AthleteItem[]; summary: AthletesSummary }>(path);
+        if (cached) {
+          setFromCache(true);
+          setAthletes((cached.data.athletes || []) as AthleteItem[]);
+          setSummary(cached.data.summary || { total: 0, totalMedals: 0, totalRecords: 0 });
+          setLoading(false);
+        } else {
+          setLoading(true);
+        }
       }
 
       try {
-        const result = await apiGetCached<{ athletes: AthleteItem[]; summary: AthletesSummary }>(path);
+        const result = await apiGetCached<{ athletes: AthleteItem[]; summary: AthletesSummary }>(
+          path,
+          true,
+          { forceNetwork }
+        );
 
         setFromCache(result.fromCache);
         setAthletes((result.data.athletes || []) as AthleteItem[]);
         setSummary(result.data.summary || { total: 0, totalMedals: 0, totalRecords: 0 });
       } catch (err) {
         const message = getApiErrorMessage(err);
-        setError(message);
-        setAthletes([]);
+        if (forceNetwork || !athletes.length) {
+          setError(message);
+          setAthletes([]);
+        }
       } finally {
         setLoading(false);
+        setRefreshing(false);
       }
     },
-    [activeFilter, searchQuery]
+    [activeFilter, athletes.length, searchQuery]
   );
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    void loadAthletes(searchQuery, activeFilter, true);
+  }, [activeFilter, loadAthletes, searchQuery]);
 
   useEffect(() => {
     if (searchTimer.current) {
@@ -272,12 +288,15 @@ export default function AthletesScreen() {
         <NotificationBell />
       </View>
 
-      <OfflineBanner />
+      <OfflineBanner refreshing={refreshing} />
 
       <ScrollView
         stickyHeaderIndices={[2]}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#FF9F1C" colors={['#FF9F1C']} />
+        }
       >
         {/* Hero Card */}
         <View style={styles.heroCard}>

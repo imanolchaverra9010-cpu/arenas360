@@ -9,6 +9,8 @@ import {
   readCacheEntry,
   removeQueuedRequest,
   saveCacheEntry,
+  switchCacheUser,
+  clearOfflineData,
 } from '@/services/offline-db';
 
 export type CachedResponse<T> = {
@@ -238,9 +240,19 @@ export async function refreshAllCachedData(): Promise<void> {
 
   await Promise.allSettled(
     getKeys.map(async (key) => {
-      const [, authFlag, ...pathParts] = key.split(':');
-      const path = pathParts.join(':');
-      const auth = authFlag === 'auth';
+      const parts = key.split(':');
+      if (parts.length < 3) {
+        return;
+      }
+
+      const method = parts[0];
+      const scope = parts[1];
+      const path = parts.slice(2).join(':');
+      const auth = scope !== 'public';
+
+      if (method !== 'GET') {
+        return;
+      }
 
       try {
         const data = await apiFetch<unknown>(path, { method: 'GET', auth });
@@ -252,6 +264,12 @@ export async function refreshAllCachedData(): Promise<void> {
     })
   );
 }
+
+export async function clearUserCache() {
+  await clearOfflineData();
+}
+
+export { switchCacheUser };
 
 export function pathToCacheKey(path: string, auth = true): string {
   return buildCacheKey('GET', path, auth);

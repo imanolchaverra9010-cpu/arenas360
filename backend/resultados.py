@@ -77,13 +77,21 @@ def _row_to_podium_member(row: dict, api_base: str | None = None) -> dict:
     }
 
 
-def fetch_competiciones_con_resultados(db: Session) -> list[dict]:
-    query = text("""
+def _event_tenant_clause(tenant_id: int | None) -> tuple[str, dict]:
+    if tenant_id is None:
+        return "", {}
+    return "AND e.tenant_id = :tenant_id", {"tenant_id": tenant_id}
+
+
+def fetch_competiciones_con_resultados(db: Session, tenant_id: int | None = None) -> list[dict]:
+    tenant_filter, tenant_params = _event_tenant_clause(tenant_id)
+    query = text(f"""
         SELECT
             e.id,
             e.nombre,
             e.fecha_fin,
             e.fecha_inicio,
+            e.tenant_id,
             s.nombre AS escenario_nombre,
             s.municipio,
             COUNT(DISTINCT r.id) AS num_resultados,
@@ -95,11 +103,12 @@ def fetch_competiciones_con_resultados(db: Session) -> list[dict]:
         WHERE e.activo = true
           AND r.estado IN ('VALIDADO', 'OFICIAL')
           AND r.descalificado = false
-        GROUP BY e.id, e.nombre, e.fecha_fin, e.fecha_inicio,
+          {tenant_filter}
+        GROUP BY e.id, e.nombre, e.fecha_fin, e.fecha_inicio, e.tenant_id,
                  s.nombre, s.municipio
         ORDER BY MAX(r.created_at) DESC NULLS LAST, e.fecha_fin DESC NULLS LAST
     """)
-    rows = db.execute(query).mappings().all()
+    rows = db.execute(query, tenant_params).mappings().all()
     competitions = []
     for row in rows:
         escenario = None
@@ -110,7 +119,7 @@ def fetch_competiciones_con_resultados(db: Session) -> list[dict]:
             nombre=row["nombre"],
             fecha_fin=row["fecha_fin"],
             fecha_inicio=row["fecha_inicio"],
-            tenant_id=1,
+            tenant_id=int(row.get("tenant_id") or 1),
             estado="FINALIZADO",
             activo=True,
         )
@@ -125,12 +134,21 @@ def fetch_competiciones_con_resultados(db: Session) -> list[dict]:
     return competitions
 
 
-def fetch_resultados_resumen(db: Session, evento_id: int | None = None) -> dict:
+def fetch_resultados_resumen(
+    db: Session,
+    evento_id: int | None = None,
+    tenant_id: int | None = None,
+) -> dict:
     params: dict = {}
     evento_filter = ""
     if evento_id is not None:
         evento_filter = "AND i.evento_id = :evento_id"
         params["evento_id"] = evento_id
+
+    tenant_filter = ""
+    if tenant_id is not None:
+        tenant_filter = "AND e.tenant_id = :tenant_id"
+        params["tenant_id"] = tenant_id
 
     query = text(f"""
         SELECT
@@ -140,9 +158,11 @@ def fetch_resultados_resumen(db: Session, evento_id: int | None = None) -> dict:
             COUNT(DISTINCT CONCAT(i.evento_id, '-', i.prueba_id)) AS pruebas
         FROM resultados r
         JOIN inscripciones i ON i.id = r.inscripcion_id
+        JOIN eventos e ON e.id = i.evento_id
         WHERE r.estado IN ('VALIDADO', 'OFICIAL')
           AND r.descalificado = false
           {evento_filter}
+          {tenant_filter}
     """)
     row = db.execute(query, params).mappings().first()
     return {
@@ -256,6 +276,7 @@ def fetch_resultados_por_evento(
     evento_id: int,
     filtro: str | None = None,
     api_base: str | None = None,
+    tenant_id: int | None = None,
 ) -> list[dict]:
     rows = _fetch_result_rows(db, evento_id)
     if not rows:
@@ -370,12 +391,21 @@ def fetch_resultado_detalle(db: Session, result_id: str, api_base: str | None = 
     }
 
 
-def fetch_atletas_con_podios(db: Session, evento_id: int | None = None) -> list[dict]:
+def fetch_atletas_con_podios(
+    db: Session,
+    evento_id: int | None = None,
+    tenant_id: int | None = None,
+) -> list[dict]:
     params: dict = {}
     evento_filter = ""
     if evento_id is not None:
         evento_filter = "AND i.evento_id = :evento_id"
         params["evento_id"] = evento_id
+
+    tenant_filter = ""
+    if tenant_id is not None:
+        tenant_filter = "AND d.tenant_id = :tenant_id"
+        params["tenant_id"] = tenant_id
 
     query = text(f"""
         SELECT
@@ -404,6 +434,7 @@ def fetch_atletas_con_podios(db: Session, evento_id: int | None = None) -> list[
           AND r.descalificado = false
           AND r.posicion IN (1,2,3)
           {evento_filter}
+          {tenant_filter}
         GROUP BY i.deportista_id, per.primer_nombre, per.segundo_nombre,
                  per.primer_apellido, per.segundo_apellido
         ORDER BY podios DESC, oros DESC, platas DESC, bronces DESC, atleta

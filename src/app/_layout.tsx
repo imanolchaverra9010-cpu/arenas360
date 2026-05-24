@@ -35,6 +35,8 @@ function RootNavigator() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="register" />
+        <Stack.Screen name="forgotPassword" />
+        <Stack.Screen name="resetPassword" />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="eventDetails" options={{ presentation: 'card', title: 'Detalles del Evento' }} />
         <Stack.Screen name="eventSchedule" options={{ presentation: 'card', title: 'Calendario del Evento' }} />

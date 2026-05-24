@@ -14,13 +14,13 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://192.168.18.13:8000"
+        "EXPO_PUBLIC_API_URL": "https://your-api.onrender.com"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://192.168.18.13:8000"
+        "EXPO_PUBLIC_API_URL": "https://your-api.onrender.com"
       }
     }
   },

@@ -7,6 +7,7 @@ import {
   Dimensions,
   Image,
   Platform,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -95,13 +96,14 @@ export default function ResultsScreen() {
     pruebas: 0,
   });
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [fromCache, setFromCache] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
 
   const loadResults = useCallback(
-    async (eventoId?: string, filterIndex = activeFilter) => {
+    async (eventoId?: string, filterIndex = activeFilter, forceNetwork = false) => {
       setError('');
 
       const params = new URLSearchParams();
@@ -111,21 +113,23 @@ export default function ResultsScreen() {
       }
       const path = `/api/resultados/?${params.toString()}`;
 
-      const cached = await peekCacheForPath<{
-        competitions: Competition[];
-        summary: ResultsSummary;
-        results: ResultItem[];
-      }>(path);
-      if (cached) {
-        const comps = (cached.data.competitions || []) as Competition[];
-        setFromCache(true);
-        setCompetitions(comps);
-        setSummary(cached.data.summary || { eventos: 0, records: 0, participantes: 0, pruebas: 0 });
-        setResults((cached.data.results || []) as ResultItem[]);
-        setSelectedCompetition(eventoId || comps[0]?.id || '');
-        setLoading(false);
-      } else {
-        setLoading(true);
+      if (!forceNetwork) {
+        const cached = await peekCacheForPath<{
+          competitions: Competition[];
+          summary: ResultsSummary;
+          results: ResultItem[];
+        }>(path);
+        if (cached) {
+          const comps = (cached.data.competitions || []) as Competition[];
+          setFromCache(true);
+          setCompetitions(comps);
+          setSummary(cached.data.summary || { eventos: 0, records: 0, participantes: 0, pruebas: 0 });
+          setResults((cached.data.results || []) as ResultItem[]);
+          setSelectedCompetition(eventoId || comps[0]?.id || '');
+          setLoading(false);
+        } else {
+          setLoading(true);
+        }
       }
 
       try {
@@ -133,7 +137,7 @@ export default function ResultsScreen() {
           competitions: Competition[];
           summary: ResultsSummary;
           results: ResultItem[];
-        }>(path);
+        }>(path, true, { forceNetwork });
 
         const comps = (result.data.competitions || []) as Competition[];
         setFromCache(result.fromCache);
@@ -145,15 +149,23 @@ export default function ResultsScreen() {
         setSelectedCompetition(activeId);
       } catch (err) {
         const message = getApiErrorMessage(err, 'No se pudieron cargar los resultados');
-        setError(message);
-        setCompetitions([]);
-        setResults([]);
+        if (forceNetwork || !competitions.length) {
+          setError(message);
+          setCompetitions([]);
+          setResults([]);
+        }
       } finally {
         setLoading(false);
+        setRefreshing(false);
       }
     },
-    [activeFilter]
+    [activeFilter, competitions.length]
   );
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    void loadResults(selectedCompetition || undefined, activeFilter, true);
+  }, [activeFilter, loadResults, selectedCompetition]);
 
   useEffect(() => {
     loadResults();
@@ -354,12 +366,15 @@ export default function ResultsScreen() {
         <NotificationBell />
       </View>
 
-      <OfflineBanner />
+      <OfflineBanner refreshing={refreshing} />
 
       <ScrollView
         stickyHeaderIndices={[2]}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#FF9F1C" colors={['#FF9F1C']} />
+        }
       >
         {/* Hero Card — same white card as events */}
         <Animated.View

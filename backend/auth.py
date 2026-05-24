@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
+import logging
 import os
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -19,8 +20,35 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # JWT settings
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+INSECURE_SECRET_KEYS = {
+    "your-secret-key-change-in-production",
+    "dev-secret-key-change-in-production-12345678",
+}
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
+
+logger = logging.getLogger(__name__)
+
+
+def validate_secret_key() -> None:
+    """Refuse to start in production with a default or weak secret."""
+    debug = os.getenv("DEBUG", "False").lower() == "true"
+    if SECRET_KEY in INSECURE_SECRET_KEYS or len(SECRET_KEY) < 32:
+        if debug:
+            logger.warning("SECRET_KEY is insecure — acceptable only in DEBUG mode")
+            return
+        raise RuntimeError(
+            "SECRET_KEY must be a random string of at least 32 characters in production"
+        )
+
+
+def resolve_tenant_filter(user: Usuario | None, requested: int | None = None) -> int | None:
+    """Non-superadmin users are always scoped to their tenant."""
+    if user is None:
+        return requested
+    if user.rol == RolUsuario.SUPERADMIN:
+        return requested
+    return user.tenant_id
 
 
 def hash_password(password: str) -> str:
@@ -105,6 +133,30 @@ async def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Usuario inactivo",
         )
+
+    return usuario
+
+
+async def get_optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: Session = Depends(get_db),
+) -> Usuario | None:
+    if credentials is None:
+        return None
+
+    payload = decode_access_token(credentials.credentials)
+    if not payload:
+        return None
+
+    user_id = payload.get("sub")
+    if user_id is None:
+        return None
+
+    stmt = select(Usuario).where(Usuario.id == int(user_id))
+    usuario = db.execute(stmt).scalars().first()
+
+    if not usuario or not usuario.activo:
+        return None
 
     return usuario
 

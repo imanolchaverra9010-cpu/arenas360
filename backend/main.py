@@ -9,10 +9,13 @@ import logging
 import os
 
 from backend.database import get_db, engine, ensure_schema_updates
-from backend.models import Base, Usuario
+from backend.models import Base, Usuario, RolUsuario, Evento
 from backend.schemas import (
     LoginRequest,
     LoginResponse,
+    PasswordResetRequest,
+    PasswordResetConfirm,
+    PasswordResetResponse,
     UsuarioCreate,
     UsuarioResponse,
     TenantPublicItem,
@@ -48,7 +51,16 @@ from backend.schemas import (
     ProcesarNotificacionesResultadosResponse,
     PushPruebaResponse,
 )
-from backend.auth import verify_password, create_access_token, hash_password, get_current_user, require_admin
+from backend.auth import (
+    verify_password,
+    create_access_token,
+    hash_password,
+    get_current_user,
+    get_optional_user,
+    require_admin,
+    resolve_tenant_filter,
+    validate_secret_key,
+)
 from backend.eventos import fetch_eventos, fetch_evento_detalle, fetch_evento_cronograma, fetch_competencia_detalle
 from backend.atletas import fetch_atletas_list, fetch_atletas_resumen, fetch_atleta_perfil, fetch_atletas_comparacion
 from backend.disciplinas import fetch_disciplinas_list, fetch_disciplinas_resumen, fetch_disciplina_detalle
@@ -66,7 +78,9 @@ from backend import preferencias as preferencias_service
 from backend import resultados_notificaciones as resultados_notificaciones_service
 from backend import usuarios as usuarios_service
 from backend import tenants as tenants_service
+from backend import password_reset as password_reset_service
 from backend.database import SessionLocal
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 RESULT_NOTIFICATIONS_INTERVAL_SECONDS = int(
@@ -82,6 +96,7 @@ app = FastAPI(
 @app.on_event("startup")
 def on_startup():
     """Ensure tables exist when the API starts."""
+    validate_secret_key()
     Base.metadata.create_all(bind=engine)
     ensure_schema_updates()
 
@@ -106,20 +121,36 @@ async def start_background_workers():
     asyncio.create_task(_result_notifications_worker())
 
 
-# CORS middleware
+# CORS middleware — credentials cannot be used with allow_origins=["*"]
+_cors_raw = os.getenv("CORS_ORIGINS", "*").strip()
+if _cors_raw == "*":
+    _cors_origins = ["*"]
+    _cors_credentials = False
+else:
+    _cors_origins = [origin.strip() for origin in _cors_raw.split(",") if origin.strip()]
+    _cors_credentials = True
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy"}
+async def health_check(db: Session = Depends(get_db)):
+    """Health check endpoint with database connectivity."""
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "healthy", "database": "connected"}
+    except Exception as exc:
+        logger.error("Health check failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable",
+        ) from exc
 
 
 @app.post("/api/auth/login", response_model=LoginResponse)
@@ -293,9 +324,31 @@ async def register(
     )
 
 
+@app.post("/api/auth/password-reset/request", response_model=PasswordResetResponse)
+async def request_password_reset(payload: PasswordResetRequest, db: Session = Depends(get_db)):
+    """Request a password reset link (token returned only in DEBUG mode)."""
+    result = password_reset_service.request_password_reset(db, payload.email)
+    return PasswordResetResponse(**result)
+
+
+@app.post("/api/auth/password-reset/confirm")
+async def confirm_password_reset(payload: PasswordResetConfirm, db: Session = Depends(get_db)):
+    """Set a new password using a valid reset token."""
+    try:
+        password_reset_service.confirm_password_reset(db, payload.token, payload.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"ok": True, "message": "Contraseña actualizada correctamente"}
+
+
 @app.get("/api/usuarios/{usuario_id}", response_model=UsuarioResponse)
-async def get_usuario(usuario_id: int, db: Session = Depends(get_db)):
-    """Get user by ID"""
+async def get_usuario(
+    usuario_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Get user by ID (self or admin within tenant)."""
     stmt = select(Usuario).where(Usuario.id == usuario_id)
     usuario = db.execute(stmt).scalars().first()
 
@@ -305,22 +358,35 @@ async def get_usuario(usuario_id: int, db: Session = Depends(get_db)):
             detail="Usuario no encontrado",
         )
 
-    return UsuarioResponse.model_validate(usuario)
+    if current_user.id != usuario_id:
+        if current_user.rol not in {RolUsuario.SUPERADMIN, RolUsuario.ADMIN_TENANT}:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado")
+        if (
+            current_user.rol == RolUsuario.ADMIN_TENANT
+            and usuario.tenant_id != current_user.tenant_id
+        ):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado")
+
+    return usuarios_service.serialize_usuario(usuario, api_base=_api_base(request))
 
 
 @app.get("/api/usuarios/", response_model=list[UsuarioResponse])
 async def list_usuarios(
-    tenant_id: int = None,
-    db: Session = Depends(get_db)
+    tenant_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(require_admin),
 ):
-    """List all users or by tenant"""
+    """List users (admin only, scoped to tenant)."""
     stmt = select(Usuario)
-    
-    if tenant_id:
-        stmt = stmt.where(Usuario.tenant_id == tenant_id)
-    
+
+    if current_user.rol == RolUsuario.SUPERADMIN:
+        if tenant_id:
+            stmt = stmt.where(Usuario.tenant_id == tenant_id)
+    else:
+        stmt = stmt.where(Usuario.tenant_id == current_user.tenant_id)
+
     usuarios = db.execute(stmt).scalars().all()
-    return [UsuarioResponse.model_validate(u) for u in usuarios]
+    return [usuarios_service.serialize_usuario(u) for u in usuarios]
 
 
 @app.post("/api/seguimientos/toggle", response_model=SeguimientoEstadoResponse)
@@ -502,6 +568,17 @@ def _api_base(request: Request) -> str:
     return str(request.base_url).rstrip("/")
 
 
+def _ensure_event_visible(db: Session, evento_id: int, tenant_id: int | None) -> None:
+    if tenant_id is None:
+        return
+    evento = db.get(Evento, evento_id)
+    if not evento or evento.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Evento no encontrado",
+        )
+
+
 @app.get("/api/media/{file_path:path}")
 async def get_media(file_path: str):
     """Serve event images stored as relative paths in the database."""
@@ -514,6 +591,7 @@ async def list_eventos(
     estado: str | None = None,
     tenant_id: int | None = None,
     db: Session = Depends(get_db),
+    current_user: Usuario | None = Depends(get_optional_user),
 ):
     """List active events from PostgreSQL. Filter: PRÓXIMO, EN CURSO, FINALIZADO."""
     if estado and estado not in VALID_ESTADOS_UI:
@@ -522,7 +600,13 @@ async def list_eventos(
             detail="Estado inválido. Use: PRÓXIMO, EN CURSO o FINALIZADO",
         )
 
-    items = fetch_eventos(db, tenant_id=tenant_id, estado_ui=estado, api_base=_api_base(request))
+    effective_tenant = resolve_tenant_filter(current_user, tenant_id)
+    items = fetch_eventos(
+        db,
+        tenant_id=effective_tenant,
+        estado_ui=estado,
+        api_base=_api_base(request),
+    )
     return [EventoResponse(**item) for item in items]
 
 
@@ -531,9 +615,11 @@ async def eventos_resumen(
     request: Request,
     tenant_id: int | None = None,
     db: Session = Depends(get_db),
+    current_user: Usuario | None = Depends(get_optional_user),
 ):
     """Summary counts for the events dashboard."""
-    items = fetch_eventos(db, tenant_id=tenant_id, api_base=_api_base(request))
+    effective_tenant = resolve_tenant_filter(current_user, tenant_id)
+    items = fetch_eventos(db, tenant_id=effective_tenant, api_base=_api_base(request))
     return EventosResumenResponse(
         total=len(items),
         en_curso=sum(1 for e in items if e["status"] == "EN CURSO"),
@@ -543,8 +629,15 @@ async def eventos_resumen(
 
 
 @app.get("/api/eventos/{evento_id}/cronograma", response_model=EventoCronogramaResponse)
-async def get_evento_cronograma(evento_id: int, request: Request, db: Session = Depends(get_db)):
+async def get_evento_cronograma(
+    evento_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Usuario | None = Depends(get_optional_user),
+):
     """Full competition schedule for the event calendar screen."""
+    effective_tenant = resolve_tenant_filter(current_user, None)
+    _ensure_event_visible(db, evento_id, effective_tenant)
     item = fetch_evento_cronograma(db, evento_id, api_base=_api_base(request))
 
     if not item:
@@ -557,8 +650,15 @@ async def get_evento_cronograma(evento_id: int, request: Request, db: Session = 
 
 
 @app.get("/api/eventos/{evento_id}", response_model=EventoDetalleResponse)
-async def get_evento(evento_id: int, request: Request, db: Session = Depends(get_db)):
+async def get_evento(
+    evento_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Usuario | None = Depends(get_optional_user),
+):
     """Get full event details by ID."""
+    effective_tenant = resolve_tenant_filter(current_user, None)
+    _ensure_event_visible(db, evento_id, effective_tenant)
     item = fetch_evento_detalle(db, evento_id, api_base=_api_base(request))
 
     if not item:
@@ -591,6 +691,7 @@ async def list_resultados(
     evento_id: int | None = None,
     filtro: str | None = None,
     db: Session = Depends(get_db),
+    current_user: Usuario | None = Depends(get_optional_user),
 ):
     """Competitions with official results and optional filtered podium list."""
     if filtro and filtro.upper() not in VALID_RESULT_FILTERS:
@@ -599,18 +700,23 @@ async def list_resultados(
             detail="Filtro inválido. Use: TODOS, RECIENTES, DESTACADOS o RÉCORDS",
         )
 
+    effective_tenant = resolve_tenant_filter(current_user, None)
     api_base = _api_base(request)
-    competitions = fetch_competiciones_con_resultados(db)
-    summary = fetch_resultados_resumen(db, evento_id=evento_id)
+    competitions = fetch_competiciones_con_resultados(db, tenant_id=effective_tenant)
+    summary = fetch_resultados_resumen(db, evento_id=evento_id, tenant_id=effective_tenant)
 
     results = []
     if evento_id is not None:
-        results = fetch_resultados_por_evento(db, evento_id, filtro=filtro, api_base=api_base)
-    elif competitions:
+        _ensure_event_visible(db, evento_id, effective_tenant)
         results = fetch_resultados_por_evento(
-            db, int(competitions[0]["id"]), filtro=filtro, api_base=api_base
+            db, evento_id, filtro=filtro, api_base=api_base, tenant_id=effective_tenant
         )
-        summary = fetch_resultados_resumen(db, evento_id=int(competitions[0]["id"]))
+    elif competitions:
+        first_id = int(competitions[0]["id"])
+        results = fetch_resultados_por_evento(
+            db, first_id, filtro=filtro, api_base=api_base, tenant_id=effective_tenant
+        )
+        summary = fetch_resultados_resumen(db, evento_id=first_id, tenant_id=effective_tenant)
 
     return ResultadosIndexResponse(
         competitions=competitions,
@@ -703,6 +809,7 @@ async def list_atletas(
     q: str | None = None,
     filtro: str | None = None,
     db: Session = Depends(get_db),
+    current_user: Usuario | None = Depends(get_optional_user),
 ):
     """List athletes with search and status filters."""
     if filtro and filtro.upper() not in VALID_ATLETA_FILTERS:
@@ -711,10 +818,11 @@ async def list_atletas(
             detail="Filtro inválido. Use: TODOS, ACTIVOS, INACTIVOS o NUEVOS",
         )
 
+    effective_tenant = resolve_tenant_filter(current_user, None)
     athletes = fetch_atletas_list(
-        db, q=q, filtro=filtro, api_base=_api_base(request)
+        db, q=q, filtro=filtro, api_base=_api_base(request), tenant_id=effective_tenant
     )
-    summary = fetch_atletas_resumen(db, filtro=filtro)
+    summary = fetch_atletas_resumen(db, filtro=filtro, tenant_id=effective_tenant)
     return AtletasIndexResponse(athletes=athletes, summary=summary)
 
 
@@ -722,9 +830,13 @@ async def list_atletas(
 async def atletas_con_podios(
     evento_id: int | None = None,
     db: Session = Depends(get_db),
+    current_user: Usuario | None = Depends(get_optional_user),
 ):
     """List athletes that have at least one podium (pos 1-3) in official results."""
-    return fetch_atletas_con_podios(db, evento_id=evento_id)
+    effective_tenant = resolve_tenant_filter(current_user, None)
+    if evento_id is not None:
+        _ensure_event_visible(db, evento_id, effective_tenant)
+    return fetch_atletas_con_podios(db, evento_id=evento_id, tenant_id=effective_tenant)
 
 
 @app.get("/api/atletas/comparar", response_model=AtletaCompareResponse)
@@ -756,9 +868,17 @@ async def comparar_atletas(
 
 
 @app.get("/api/atletas/{deportista_id}", response_model=AtletaPerfilResponse)
-async def get_atleta(deportista_id: int, request: Request, db: Session = Depends(get_db)):
+async def get_atleta(
+    deportista_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Usuario | None = Depends(get_optional_user),
+):
     """Get athlete profile by athlete (deportista) ID."""
-    item = fetch_atleta_perfil(db, deportista_id, api_base=_api_base(request))
+    effective_tenant = resolve_tenant_filter(current_user, None)
+    item = fetch_atleta_perfil(
+        db, deportista_id, api_base=_api_base(request), tenant_id=effective_tenant
+    )
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

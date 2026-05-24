@@ -11,7 +11,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -111,39 +111,6 @@ export default function LoginScreen() {
               {/* Decorative Line */}
               <View style={styles.decorativeLine} />
 
-              {/* Google Button */}
-              <TouchableOpacity 
-                style={styles.googleButton}
-                activeOpacity={0.85}
-                onPress={() => router.replace('/events')}
-              >
-                <View style={styles.googleIconContainer}>
-                  <Ionicons name="logo-google" size={20} color="#DB4437" />
-                </View>
-                <Text style={styles.googleButtonText}>Continuar con Google</Text>
-              </TouchableOpacity>
-
-              {/* Apple Button */}
-              <TouchableOpacity 
-                style={styles.appleButton}
-                activeOpacity={0.85}
-                onPress={() => router.replace('/events')}
-              >
-                <View style={styles.appleIconContainer}>
-                  <Ionicons name="logo-apple" size={20} color="white" />
-                </View>
-                <Text style={styles.appleButtonText}>Continuar con Apple</Text>
-              </TouchableOpacity>
-
-              {/* Separator */}
-              <View style={styles.separatorContainer}>
-                <View style={styles.separatorLine} />
-                <View style={styles.separatorCircle}>
-                  <Text style={styles.separatorText}>o</Text>
-                </View>
-                <View style={styles.separatorLine} />
-              </View>
-
               {/* Form Section */}
               <View style={styles.formSection}>
                 {/* Error Message */}
@@ -195,7 +162,7 @@ export default function LoginScreen() {
                     <View style={styles.checkbox} />
                     <Text style={styles.checkboxLabel}>Recuérdame</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity>
+                  <TouchableOpacity onPress={() => router.push('/forgotPassword')}>
                     <Text style={styles.forgotPassword}>¿Olvidaste tu contraseña?</Text>
                   </TouchableOpacity>
                 </View>

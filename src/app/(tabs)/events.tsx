@@ -8,6 +8,7 @@ import {
   ImageBackground,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -325,6 +326,9 @@ export default function EventsScreenV2() {
         stickyHeaderIndices={[2]}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refetch} tintColor="#FF9F1C" colors={['#FF9F1C']} />
+        }
       >
         <View style={[styles.heroCard, IS_ANDROID && styles.heroCardAndroid]}>
           {!IS_ANDROID && (

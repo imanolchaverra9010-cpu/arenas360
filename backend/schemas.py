@@ -86,6 +86,20 @@ class LoginResponse(BaseModel):
     usuario: UsuarioResponse
 
 
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str = Field(..., min_length=16, max_length=255)
+    password: str = Field(..., min_length=8)
+
+
+class PasswordResetResponse(BaseModel):
+    message: str
+    debug_token: Optional[str] = None
+
+
 class TokenPayload(BaseModel):
     sub: int
     email: str

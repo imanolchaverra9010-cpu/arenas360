@@ -7,6 +7,18 @@ import enum
 Base = declarative_base()
 
 
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    token = Column(String(255), unique=True, nullable=False, index=True)
+    expira_en = Column(DateTime(timezone=True), nullable=False, index=True)
+    usado = Column(Boolean, nullable=False, default=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class RolUsuario(str, enum.Enum):
     SUPERADMIN = "SUPERADMIN"
     ADMIN_TENANT = "ADMIN_TENANT"

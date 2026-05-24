@@ -12,6 +12,7 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 
 import { ApiError, apiGet, setTokenProvider, setUnauthorizedHandler } from '@/services/api';
+import { switchCacheUser, clearUserCache } from '@/services/cached-api';
 import { registerPushNotificationsIfEnabled, unregisterPushNotifications } from '@/services/push-notifications';
 import type { Usuario } from '@/types/usuario';
 import { clearSession, getSession, saveSession } from '@/utils/session-storage';
@@ -41,6 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
 
   const login = useCallback(async (token: string, user: Usuario) => {
+    await switchCacheUser(user.id);
     await saveSession(token, user);
     setAccessToken(token);
     setUsuario(user);
@@ -49,6 +51,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await unregisterPushNotifications();
+    await clearUserCache();
+    await switchCacheUser(null);
     await clearSession();
     setAccessToken(null);
     setUsuario(null);
@@ -99,6 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         setAccessToken(session.accessToken);
         setUsuario(session.usuario as Usuario);
+        await switchCacheUser((session.usuario as Usuario).id);
 
         try {
           const fresh = await apiGet<Usuario>('/api/auth/me');

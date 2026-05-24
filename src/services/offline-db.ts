@@ -10,6 +10,8 @@ type MemoryEntry = {
 
 const memoryCache = new Map<string, MemoryEntry>();
 
+let cacheUserId: string | null = null;
+
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 async function getDb(): Promise<SQLite.SQLiteDatabase> {
@@ -54,8 +56,30 @@ function parseMemoryEntry<T>(entry: MemoryEntry): { data: T; updatedAt: number }
   }
 }
 
+export function setCacheUserId(userId: string | number | null) {
+  cacheUserId = userId === null ? null : String(userId);
+}
+
+export function getCacheUserId() {
+  return cacheUserId;
+}
+
 export function buildCacheKey(method: string, path: string, auth: boolean): string {
-  return `${method}:${auth ? 'auth' : 'public'}:${path}`;
+  if (!auth) {
+    return `${method}:public:${path}`;
+  }
+
+  const scope = cacheUserId ? `u${cacheUserId}` : 'auth';
+  return `${method}:${scope}:${path}`;
+}
+
+/** Switch logged-in user: clears cache if the account changed on this device. */
+export async function switchCacheUser(userId: string | number | null) {
+  const nextId = userId === null ? null : String(userId);
+  if (cacheUserId && nextId && cacheUserId !== nextId) {
+    await clearOfflineData();
+  }
+  cacheUserId = nextId;
 }
 
 export async function initOfflineDb(): Promise<void> {

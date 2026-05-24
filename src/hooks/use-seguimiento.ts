@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Alert } from 'react-native';
 
 import {
   getSeguimientoEstado,
@@ -53,6 +54,12 @@ export function useSeguimiento(tipo: SeguimientoTipo, entidadId?: string | numbe
     try {
       const data = await toggleSeguimiento(tipo, entidadId, following);
       setFollowing(data.following);
+      if (data.queued) {
+        Alert.alert(
+          'Sin conexión',
+          'El cambio se guardó localmente y se sincronizará cuando vuelvas a estar en línea.'
+        );
+      }
     } finally {
       setLoading(false);
     }
